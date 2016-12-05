@@ -1,0 +1,44 @@
+# usage: 
+# ansible-playbook -i hosts ssh_nopass.yml -e "hosts=daily user=sel-fish"
+
+- hosts: "{{ hosts }}"
+  vars:
+    - sshpubs_rslt: "{{ lookup('env', 'PWD') + '/sshpubs.rslt' }}"
+  tasks:
+    - name: Deliver My SSH key to Each Node
+      authorized_key:
+          user: "{{ user }}"
+          key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub') }}"
+          key_options: ""
+          state: present
+          exclusive: no
+    - name: Generate SSH keys
+      shell: ssh-keygen -b 2048 -t rsa -q -N '' -f "{{ ansible_env.HOME }}/.ssh/id_rsa"
+      args:
+        creates: "{{ ansible_env.HOME }}/.ssh/id_rsa"
+    - name: Grab SSH keys
+      shell: cat "{{ ansible_env.HOME }}/.ssh/id_rsa.pub"
+      register: ssh_pub
+  #    - debug:
+  #        var: ssh_pub.stdout
+    - local_action: command bash -c 'rm -rf {{ sshpubs_rslt }}'
+    - local_action: command bash -c 'echo {{ ssh_pub.stdout }} >> {{ sshpubs_rslt }}'
+    - name: Deliver Grabbed SSH keys to Each Node
+      authorized_key:
+          user: "{{ user }}"
+          key: "{{ lookup('file', sshpubs_rslt) }}"
+          key_options: ""
+          state: present
+          exclusive: no
+    - name: turn off StrictHostKeyChecking
+      blockinfile:
+        dest: "{{ ansible_env.HOME }}/.ssh/config"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ hostvars[item]['inventory_hostname'] }}"
+        insertafter: EOF
+        create: yes
+        block: |
+          Host {{ hostvars[item]['inventory_hostname'] }}
+            StrictHostKeyChecking no
+      with_items:
+          - "{{ groups[hosts] }}"
+    - local_action: command bash -c 'rm -rf {{ sshpubs_rslt }}'
